@@ -1,5 +1,8 @@
 // All canvas drawing: the night garden, vision cones, characters and HUD.
 // Palette: deep blue night, warm lantern gold, danger red.
+// Readability rule: every element must read at a glance when the frame is
+// shrunk to a contact sheet, so floors are lit, cones are strong, and the
+// thief and the guards carry their own glow.
 import { TILE, COLS, ROWS } from './level.js';
 import { CONE_RANGE, CONE_HALF_ANGLE } from './guard.js';
 
@@ -10,10 +13,20 @@ function tileHash(col, row) {
   return ((h ^ (h >> 16)) >>> 0) / 4294967295;
 }
 
+// Vision-cone fill. Strong on purpose: the cone is the game's main
+// readable signal, so even the calm cone is clearly visible.
 function coneColor(guard) {
-  if (guard.mood === 'alarmed') return 'rgba(255, 64, 48, 0.30)';
-  if (guard.mood === 'suspicious') return 'rgba(255, 166, 48, 0.26)';
-  return 'rgba(255, 214, 110, 0.20)';
+  if (guard.mood === 'alarmed') return 'rgba(255, 64, 48, 0.40)';
+  if (guard.mood === 'suspicious') return 'rgba(255, 166, 48, 0.36)';
+  return 'rgba(255, 214, 110, 0.30)';
+}
+
+// The cone's hard edge, drawn much brighter than the fill so the danger
+// zone has a crisp border at any size.
+function coneEdgeColor(guard) {
+  if (guard.mood === 'alarmed') return 'rgba(255, 96, 80, 0.85)';
+  if (guard.mood === 'suspicious') return 'rgba(255, 190, 80, 0.8)';
+  return 'rgba(255, 226, 140, 0.75)';
 }
 
 function drawCone(ctx, guard) {
@@ -24,7 +37,13 @@ function drawCone(ctx, guard) {
   ctx.closePath();
   ctx.fillStyle = coneColor(guard);
   ctx.fill();
-  ctx.strokeStyle = coneColor(guard).replace(/0\.\d+\)$/, '0.5)');
+  ctx.strokeStyle = coneEdgeColor(guard);
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // A second, fainter arc inside the cone gives the sweep depth.
+  ctx.beginPath();
+  ctx.arc(guard.x, guard.y, CONE_RANGE * 0.62, guard.angle - CONE_HALF_ANGLE, guard.angle + CONE_HALF_ANGLE);
+  ctx.strokeStyle = coneEdgeColor(guard).replace(/0\.\d+\)$/, '0.25)');
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.restore();
@@ -34,12 +53,18 @@ function drawFloor(ctx, level) {
   for (let row = 0; row < ROWS; row++) {
     for (let col = 0; col < COLS; col++) {
       const v = tileHash(col, row);
-      const base = 16 + Math.floor(v * 7);
-      ctx.fillStyle = `rgb(${base + 2}, ${base + 4}, ${base + 14})`;
+      // Lit enough to read the level at a glance, dark enough to stay night.
+      const base = 24 + Math.floor(v * 10);
+      ctx.fillStyle = `rgb(${base + 3}, ${base + 6}, ${base + 20})`;
       ctx.fillRect(col * TILE, row * TILE, TILE, TILE);
       if (v > 0.82) {
-        ctx.fillStyle = 'rgba(255, 220, 140, 0.05)';
+        ctx.fillStyle = 'rgba(255, 220, 140, 0.08)';
         ctx.fillRect(col * TILE + 8, row * TILE + 8, 10, 10);
+      }
+      // A faint checker on alternate tiles keeps the floor from going flat.
+      if ((col + row) % 2 === 0) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
+        ctx.fillRect(col * TILE, row * TILE, TILE, TILE);
       }
     }
   }
@@ -53,25 +78,32 @@ function drawShadowsAndBushes(ctx, level) {
     ctx.fillRect(s.x + 4, s.y + 4, s.w - 8, 4);
   }
   for (const b of level.bushes) {
-    ctx.fillStyle = '#1d3a1e';
+    // Bushes are cover: bright enough to spot at a glance.
+    ctx.fillStyle = '#26511f';
     ctx.beginPath();
     ctx.arc(b.x + 12, b.y + 14, 13, 0, Math.PI * 2);
     ctx.arc(b.x + 27, b.y + 10, 14, 0, Math.PI * 2);
     ctx.arc(b.x + 20, b.y + 27, 13, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#2c5a28';
+    ctx.fillStyle = '#3a7a30';
     ctx.beginPath();
     ctx.arc(b.x + 14, b.y + 12, 7, 0, Math.PI * 2);
     ctx.arc(b.x + 27, b.y + 24, 6, 0, Math.PI * 2);
+    ctx.arc(b.x + 22, b.y + 12, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#57a047';
+    ctx.beginPath();
+    ctx.arc(b.x + 12, b.y + 10, 3, 0, Math.PI * 2);
+    ctx.arc(b.x + 28, b.y + 20, 3, 0, Math.PI * 2);
     ctx.fill();
   }
 }
 
 function drawWallsAndCrates(ctx, level) {
   for (const w of level.walls) {
-    ctx.fillStyle = '#232a42';
+    ctx.fillStyle = '#2a3250';
     ctx.fillRect(w.x, w.y, w.w, w.h);
-    ctx.fillStyle = '#39436b';
+    ctx.fillStyle = '#46538a';
     ctx.fillRect(w.x, w.y, w.w, 5);
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.fillRect(w.x, w.y + w.h - 4, w.w, 4);
@@ -93,17 +125,26 @@ function drawWallsAndCrates(ctx, level) {
 
 function drawRelicAndExit(ctx, level, hasRelic, time) {
   // Exit arch: green when open, grey padlock glow when locked.
+  // An open exit pulses so it reads as the goal from across the level.
   const e = level.exit;
   ctx.save();
+  const pulse = hasRelic ? 1 + 0.12 * Math.sin(time * 3) : 1;
   ctx.beginPath();
-  ctx.arc(e.x, e.y, 26, 0, Math.PI * 2);
-  ctx.fillStyle = hasRelic ? 'rgba(80, 255, 140, 0.18)' : 'rgba(140, 150, 170, 0.10)';
+  ctx.arc(e.x, e.y, 26 * pulse, 0, Math.PI * 2);
+  ctx.fillStyle = hasRelic ? 'rgba(80, 255, 140, 0.22)' : 'rgba(140, 150, 170, 0.10)';
   ctx.fill();
   ctx.strokeStyle = hasRelic ? '#50ff8c' : '#6b7490';
   ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.arc(e.x, e.y, 20, 0, Math.PI * 2);
   ctx.stroke();
+  if (hasRelic) {
+    ctx.strokeStyle = 'rgba(80, 255, 140, 0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, 29 * pulse, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   ctx.fillStyle = hasRelic ? '#50ff8c' : '#8b93b8';
   ctx.font = 'bold 20px Georgia, serif';
   ctx.textAlign = 'center';
@@ -116,8 +157,8 @@ function drawRelicAndExit(ctx, level, hasRelic, time) {
     const tw = 0.6 + 0.4 * Math.sin(time * 4);
     ctx.save();
     ctx.beginPath();
-    ctx.arc(r.x, r.y, 22 + 4 * tw, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(255, 210, 90, ${0.12 + 0.1 * tw})`;
+    ctx.arc(r.x, r.y, 24 + 5 * tw, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 210, 90, ${0.16 + 0.12 * tw})`;
     ctx.fill();
     ctx.fillStyle = '#ffd25a';
     ctx.beginPath();
@@ -138,25 +179,30 @@ function drawRelicAndExit(ctx, level, hasRelic, time) {
 }
 
 function drawGuard(ctx, guard, time) {
-  // Lantern glow around the guard.
-  const glow = ctx.createRadialGradient(guard.x, guard.y, 4, guard.x, guard.y, 46);
-  glow.addColorStop(0, 'rgba(255, 190, 90, 0.35)');
+  // Lantern glow around the guard: wide and warm so guards read
+  // against the floor even in a shrunk screenshot.
+  const glow = ctx.createRadialGradient(guard.x, guard.y, 4, guard.x, guard.y, 58);
+  glow.addColorStop(0, 'rgba(255, 190, 90, 0.42)');
   glow.addColorStop(1, 'rgba(255, 190, 90, 0)');
   ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.arc(guard.x, guard.y, 46, 0, Math.PI * 2);
+  ctx.arc(guard.x, guard.y, 58, 0, Math.PI * 2);
   ctx.fill();
   // Body: warm-lit watchman with a helmet.
   ctx.save();
   ctx.translate(guard.x, guard.y);
   ctx.rotate(guard.angle);
-  ctx.fillStyle = '#c8a24a';
+  ctx.fillStyle = '#d8b25e';
   ctx.beginPath();
   ctx.arc(0, 0, 14, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = '#3a2f18';
   ctx.beginPath();
   ctx.arc(0, 0, 9, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffe9a8';
+  ctx.beginPath();
+  ctx.arc(-3, -3, 2.5, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = '#ffd25a';
   ctx.beginPath();
@@ -188,16 +234,25 @@ function drawGuard(ctx, guard, time) {
 }
 
 function drawPlayer(ctx, player, time) {
+  // The thief carries a faint gold glow: the player must be findable
+  // in the frame at a glance, even while sneaking in the dark.
+  const glow = ctx.createRadialGradient(player.x, player.y, 4, player.x, player.y, 36);
+  glow.addColorStop(0, 'rgba(255, 210, 90, 0.30)');
+  glow.addColorStop(1, 'rgba(255, 210, 90, 0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, 36, 0, Math.PI * 2);
+  ctx.fill();
   ctx.save();
   // Cloak: a dark hooded figure, rim-lit by the lanterns.
   ctx.translate(player.x, player.y);
   ctx.rotate(player.angle);
-  ctx.fillStyle = player.sneaking ? '#1c2438' : '#2a3454';
+  ctx.fillStyle = player.sneaking ? '#232c47' : '#33415f';
   ctx.beginPath();
   ctx.arc(0, 0, 13, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = player.coverKind ? '#50ff8c' : '#ffd25a';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2.5;
   ctx.beginPath();
   ctx.arc(0, 0, 13, -0.9, 0.9);
   ctx.stroke();
@@ -208,7 +263,7 @@ function drawPlayer(ctx, player, time) {
   ctx.fillStyle = '#ffd25a';
   ctx.beginPath();
   ctx.moveTo(13, -4);
-  ctx.lineTo(21, 0);
+  ctx.lineTo(24, 0);
   ctx.lineTo(13, 4);
   ctx.closePath();
   ctx.fill();
@@ -287,10 +342,11 @@ export function render(ctx, state) {
   drawWallsAndCrates(ctx, level);
   for (const g of guards) drawGuard(ctx, g, time);
   drawPlayer(ctx, player, time);
-  // Soft vignette: the night closes in at the edges.
+  // Soft vignette: the night closes in at the edges, lightly now so
+  // the corners still read in a small screenshot.
   const vg = ctx.createRadialGradient(480, 300, 220, 480, 300, 640);
   vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, 'rgba(0,0,0,0.42)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.32)');
   ctx.fillStyle = vg;
   ctx.fillRect(0, 0, 960, 600);
   drawHud(ctx, state);

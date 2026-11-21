@@ -134,9 +134,11 @@ function handleKeys() {
   clearPressed(input);
 }
 
-// Deterministic setups for screenshots (?shot=start|play|end).
+// Deterministic setups for screenshots (?shot=start|play|chase|end).
 // The play shot drops the thief mid-garden with a guard's cone sweeping
 // close by and suspicion half-raised — the game's tensest moment.
+// The chase shot freezes an alarmed guard mid-pursuit instead of the
+// CAUGHT overlay, so the frame shows the chase itself.
 function applyShot(shot) {
   if (shot === 'start') {
     loadLevel(0);
@@ -165,7 +167,45 @@ function applyShot(shot) {
     g2.x = 100;
     g2.y = 140;
     g2.angle = Math.PI / 2;
+    // A third cone sweeping the upper middle so the cover shows the
+    // court from two directions at once.
+    const g3 = state.guards[2];
+    g3.x = 540;
+    g3.y = 200;
+    g3.angle = Math.PI * 0.75;
     state.alarm = 58;
+    return;
+  }
+  if (shot === 'chase') {
+    // The chase as live gameplay, not the CAUGHT overlay: an alarmed
+    // guard rushes the thief down the garden, red cone and all, while
+    // the thief flees with the relic toward the open exit.
+    loadLevel(0);
+    state.phase = 'playing';
+    state.player.x = 700;
+    state.player.y = 460;
+    state.player.angle = 2.03;
+    state.player.sneaking = false;
+    state.player.moving = true;
+    state.player.hasRelic = true;
+    state.hasRelic = true;
+    state.elapsed = 63;
+    state.score = 950;
+    const g = state.guards[2];
+    g.x = 740;
+    g.y = 380;
+    g.angle = Math.atan2(460 - 380, 700 - 740);
+    g.suspicion = 100;
+    g.mood = 'alarmed';
+    g.lastSeen = { x: 700, y: 460 };
+    const g2 = state.guards[1];
+    g2.x = 460;
+    g2.y = 220;
+    g2.angle = Math.PI / 2;
+    g2.suspicion = 41;
+    g2.mood = 'suspicious';
+    g2.lastSeen = { x: 700, y: 460 };
+    state.alarm = 100;
     return;
   }
   if (shot === 'end') {
